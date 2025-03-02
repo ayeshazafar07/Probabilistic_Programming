@@ -1,0 +1,222 @@
+---
+title: "Assignment 7 Report"
+author: "Ayesha Zafar"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# 7. Gaussian processes
+
+---
+
+### **7.1 Build a Stan implementation for the following model y(x)∼N(f(x),σ2)f(x)∼GP(0,KSE(α,λ))σ∼Γ(2,1),where KSE(α,λ) is the squared exponential covariance kernel with variance α2 and length-scale λ. Set the natural logarithm of tree circumference as y, and age as x. Set suitable values for the hyperparameters. Fit the model on the data.**
+
+The code below implements a Gaussian Process model with a squared exponential covariance kernel in stan. 
+The gaussian process is used to model the natural logarithm of tree circumferences (y) as a function of tree age (x). The squared exponential kernel defines the covariance structure with parameters α (variance) and λ (length scale), while σ accounts for observation noise.
+
+The stan model specifies following things:
+
+1. Kernel Function: The squared exponential kernel to capture smooth variations in y(x).
+
+2. Latent Function f(x): Multivariate normal prior with covariance matrix from the kernel.
+
+3. Observation Model: y ∼ N(f,σ^2), with added noise.
+
+4. Priors: For α, λ, and σ, to ensure regularization.
+
+Lastly, the model is fit to the data, estimating posterior distributions for the kernel parameters and noise. It also tells the latent function values f(x), which describes the underlying trend in the data.
+
+```{r}
+library(rstan)
+
+# Loading data from data7.txt
+data <- read.csv("data7.txt", stringsAsFactors = FALSE)
+
+# Checking columns are correctly typed
+data$circumference <- as.numeric(data$circumference)
+data$age <- as.numeric(data$age)
+summary(data)
+
+# Preparing variables x and y
+x <- data$age
+y <- log(data$circumference)
+
+# Check for NA values
+if (any(is.na(y))) {
+  stop("Log of circumference contains NA values.")
+}
+
+# Setting stan model
+stan_code <- "
+data {
+  // No of data points
+  int<lower=1> N;               
+  // Tree age
+  vector[N] x;                  
+  // Log circumference
+  vector[N] y;                  
+}
+parameters {
+  // Variance
+  real<lower=0> alpha;          
+  // Length-scale
+  real<lower=0> lambda;         
+  // Noise
+  real<lower=0> sigma;          
+  // Latent function values
+  vector[N] f;                  
+}
+model {
+  // α, λ, and σ Priors
+  alpha ~ normal(0, 5);
+  lambda ~ normal(0, 5);
+  sigma ~ gamma(2, 1);
+  
+  // Setting and filling squared exponential covariance matrix
+  matrix[N, N] K;
+  for (i in 1:N) {
+    for (j in 1:N) {
+      K[i, j] = alpha^2 * exp(-0.5 * square(x[i] - x[j]) / lambda^2);
+    }
+  }
+  K += diag_matrix(rep_vector(sigma^2, N)); // Add noise variance
+  
+  // Likelihood
+  f ~ multi_normal(rep_vector(0, N), K);
+  y ~ normal(f, sigma);
+}
+generated quantities {
+  // Posterior predictive
+  vector[N] y_pred;             
+  for (i in 1:N) {
+    y_pred[i] = normal_rng(f[i], sigma);
+  }
+}
+"
+
+# Preparing data for stan model
+stan_data <- list(
+  N = length(x),
+  x = x,
+  y = y
+)
+
+# Compiling and fitting model
+fit <- stan(model_code = stan_code, data = stan_data, iter = 2000, chains = 4)
+
+# Printing summary
+print(fit, pars = c("alpha", "lambda", "sigma"))
+```
+
+## **7.2 Compute the posterior average and variance for tree circumference at 2 years (730 days) of age.**
+
+```{r}
+# Define the point of interest
+x_new <- 730  # Age in days
+
+# Extract posterior samples
+f_samples <- extract(fit, pars = "f")$f
+alpha_samples <- extract(fit, pars = "alpha")$alpha
+lambda_samples <- extract(fit, pars = "lambda")$lambda
+sigma_samples <- extract(fit, pars = "sigma")$sigma
+
+# Compute the posterior mean and variance of f(x_new)
+N <- length(stan_data$x)
+num_samples <- length(alpha_samples)
+f_new_samples <- numeric(num_samples)
+
+for (s in 1:num_samples) {
+  # Squared exponential kernel for x_new
+  k_star <- exp(-0.5 * (stan_data$x - x_new)^2 / lambda_samples[s]^2) * alpha_samples[s]^2
+  K <- matrix(0, N, N)
+  for (i in 1:N) {
+    for (j in 1:N) {
+      K[i, j] <- alpha_samples[s]^2 * exp(-0.5 * (stan_data$x[i] - stan_data$x[j])^2 / lambda_samples[s]^2)
+    }
+  }
+  K <- K + diag(sigma_samples[s]^2, N)
+  
+  # Predictive mean and variance
+  K_inv <- solve(K)
+  mu_f_new <- t(k_star) %*% K_inv %*% f_samples[s, ]
+  var_f_new <- alpha_samples[s]^2 - t(k_star) %*% K_inv %*% k_star
+  
+  # Sample from the posterior predictive distribution
+  f_new_samples[s] <- rnorm(1, mean = mu_f_new, sd = sqrt(var_f_new))
+}
+
+# Transform back to circumference scale
+circumference_samples <- exp(f_new_samples)
+
+# Compute posterior average and variance
+posterior_mean <- mean(circumference_samples)
+posterior_variance <- var(circumference_samples)
+
+# Display results
+cat("Posterior mean circumference at 730 days:", posterior_mean, "\n")
+cat("Posterior variance circumference at 730 days:", posterior_variance, "\n")
+
+```
+
+### **7.3 Plot the posterior distribution of exp(f). Include the data points and the posterior average computed in 7.2 in the same graph.**
+```{r}
+# Load required library for plotting
+library(ggplot2)
+
+# Assuming data has been loaded into `data` as per your dataset
+
+# Compute log of circumference from the data
+log_circumference <- log(data$circumference)
+
+# Assuming posterior mean and variance have been computed as `posterior_mean` and `posterior_variance`
+circumference_mean <- posterior_mean  # Computed in 7.2
+circumference_variance <- posterior_variance  # Computed in 7.2
+circumference_sd <- sqrt(circumference_variance)
+
+# Create a density plot of the posterior samples
+circumference_density <- density(circumference_samples)
+
+# Plot the posterior distribution
+ggplot() +
+  # Add the posterior density
+  geom_line(
+    aes(x = circumference_density$x, y = circumference_density$y),
+    color = "blue",
+    linewidth = 1,   # Use 'linewidth' instead of 'size'
+    alpha = 0.8
+  ) +
+  # Add vertical line for the posterior mean
+  geom_vline(
+    aes(xintercept = circumference_mean),
+    color = "red",
+    linetype = "dashed",
+    linewidth = 1,   # Use 'linewidth' instead of 'size'
+    alpha = 0.8
+  ) +
+  # Add data points (log-transformed circumference)
+  geom_point(
+    aes(
+      x = exp(log_circumference),
+      y = rep(0, length(log_circumference))
+    ),
+    color = "darkgreen",
+    size = 2,
+    alpha = 0.6
+  ) +
+  # Customize plot appearance
+  labs(
+    title = "Posterior Distribution of exp(f)",
+    x = "Circumference (mm)",
+    y = "Density",
+    caption = "Posterior mean is highlighted in red."
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 14)
+  )
+
+```
+

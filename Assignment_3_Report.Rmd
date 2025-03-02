@@ -1,0 +1,141 @@
+---
+title: "Assignment 3 Report"
+author: "Ayesha Zafar"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# 3. Stan: E.coli
+
+---
+
+### **3.1 Build a Stan program to estimate the parameters K,r and the measurement error σ2. Use non-uniform priors.**
+
+The logistic growth model describes population dynamics using the equation:
+
+P(t) = K / [1+{(K/Po) - 1} e^−rt]
+
+Here:
+
+- K is the carrying capacity.
+- r is the growth rate.
+- Po is the initial population size (Po=0.005 is given).
+- P(t) is the population size at time t.
+
+The observed population (Pmeas) is assumed to be normally distributed around P(t) with measurement noise:
+
+Pmeas(t)∼Normal(P(t),𝜎^2)
+
+Using non-uniform priors for the parameters:
+
+- K∼Normal(0.5,0.2)
+- r∼Normal(0.1,0.05)
+- σ∼Normal(0.1,0.05)
+
+Below is the stan code, posterior analysis and visualization.
+```{r}
+library(rstan)
+
+# Loading data from ecoli3.txt
+data <- read.csv("ecoli3.txt", header = TRUE)
+head(data)
+
+# Extracting necessary variables from data
+# Number of observations in the data
+N <- nrow(data)          
+# Time points in data
+t <- data$time           
+# Measured population sizes
+P_meas <- data$E4        
+# Initial population size
+P0 <- 0.005              
+
+# Stan model
+stan_model_code <- "
+data {
+  // No of observations
+  int<lower=0> N;               
+  // Time points
+  vector[N] t;                  
+  // Measured population sizes
+  vector[N] P_meas;             
+  // Initial population size
+  real<lower=0> P0;             
+}
+parameters {
+  // Carrying capacity
+  real<lower=0> K;              
+  // Growth rate
+  real<lower=0> r;              
+  // Measurement noise
+  real<lower=0> sigma;          
+}
+model {
+  // Predicted population sizes
+  vector[N] P_pred;             
+  for (i in 1:N) {
+    P_pred[i] = K / (1 + (K / P0 - 1) * exp(-r * t[i]));
+  }
+  // P_meas
+  P_meas ~ normal(P_pred, sigma);  
+  // Prior for K
+  K ~ normal(0.5, 0.2);            
+  // Prior for r
+  r ~ normal(0.1, 0.05);           
+  // Prior for sigma
+  sigma ~ normal(0.1, 0.05);       
+}
+"
+
+# Compiling stan model
+stan_model <- stan_model(model_code = stan_model_code)
+
+# Sampling stan model
+fit <- sampling(
+  object = stan_model,
+  data = list(N = N, t = t, P_meas = P_meas, P0 = P0),
+  iter = 2000,
+  chains = 4,
+  seed = 123
+)
+
+# Printing model results
+print(fit)
+
+```
+
+### **3.2 Plot histogram of the marginal posterior samples of r and include the marginal posterior mean of r as a vertical line in the plot.**
+
+```{r}
+# Extracting posterior samples
+posterior_samples <- extract(fit)
+r_samples <- posterior_samples$r
+
+# Calculating mean of posterior samples for r
+r_mean <- mean(r_samples)
+
+# Plotting histogram
+hist(r_samples, breaks = 30, probability = TRUE, main = "Marginal Posterior of r", xlab = "r", col = "lightblue")
+
+# Adding posterior mean as a vertical line
+abline(v = r_mean, col = "red", lwd = 2, lty = 2)
+legend("topright", legend = c("Posterior Mean"), col = "red", lty = 2, lwd = 2)
+```
+
+### **3.3 Determine the posterior probability that r<0.25.**
+
+```{r}
+# Calculating posterior probability where r < 0.25
+posterior_prob_r <- mean(r_samples < 0.25)
+cat("Posterior probability (r < 0.25):", posterior_prob_r, "\n")
+```
+
+
+**References**
+
+- https://fieldnotess.medium.com/uninformative-priors-informative-priors-cef9c3c6cbdf
+
+- https://rdrr.io/cran/nimbleCarbon/man/postHPDplot.html
+

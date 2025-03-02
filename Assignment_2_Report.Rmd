@@ -1,0 +1,166 @@
+---
+title: "Assignment 2 Report"
+author: "Ayesha Zafar"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# 2. Grid approximation: Exponential
+
+---
+Consider the following statistical model:
+
+y∼Exp(ea+bx)
+
+a,b∼N(0,1),
+
+where Exp is the exponential distribution.
+
+### **2.1 Generate data from this model. Use sample size N=50, generate values for a and b from N(0,1). Generate the x-values from Uniform(0,2).**
+
+Below code generates the data from given model:
+```{r}
+# Settng seed for reproducibility
+set.seed(123)
+
+# Setting sample size
+N <- 50
+
+# Generating values for a and b from N(0, 1)
+a <- rnorm(N, mean = 0, sd = 1)
+b <- rnorm(N, mean = 0, sd = 1)
+
+# Generating x-values from Uniform(0, 2)
+x <- runif(N, min = 0, max = 2)
+
+# Calculating y-values using the exponential distribution
+y <- rexp(N, rate = exp(a + b * x))
+
+# Creating data frame for easy viewing
+data <- data.frame(x = x, y = y, a = a, b = b)
+head(data)
+
+```
+
+### **2.2 Implement the grid approximation for this model.**
+
+To implement the grid approximation for this model, we need to:
+
+1. Create a grid for possible values of a and b.
+2. Calculate the likelihood for each combination of a and b.
+3. Use Bayes theorem to calculate the posterior.
+
+```{r}
+# Setting grid for parameters a and b
+a_grid <- seq(-3, 3, length.out = 100)
+b_grid <- seq(-3, 3, length.out = 100)
+
+# Storing posterior in a matrix
+posterior <- matrix(0, nrow = length(a_grid), ncol = length(b_grid))
+
+# Calculating likelihood for combinations of a and b
+for (i in 1:length(a_grid)) {
+  for (j in 1:length(b_grid)) {
+    # Rate parameter for Exp distribution
+    lambda <- exp(a_grid[i] + b_grid[j] * x)
+    # Likelihood of y given a, b
+    likelihood <- prod(dexp(y, rate = lambda))
+    
+    # Calculating prior (assuming normal prior, mean 0 and std 1)
+    prior_a <- dnorm(a_grid[i], mean = 0, sd = 1)
+    prior_b <- dnorm(b_grid[j], mean = 0, sd = 1)
+    
+    # Calculating up to constant factor posterior
+    posterior[i, j] <- likelihood * prior_a * prior_b
+  }
+}
+
+# Normalizing posterior
+posterior <- posterior / sum(posterior)
+
+# Plotting posterior distribution
+library(ggplot2)
+posterior_df <- expand.grid(a = a_grid, b = b_grid)
+posterior_df$posterior <- as.vector(posterior)
+
+ggplot(posterior_df, aes(x = a, y = b, fill = posterior)) +
+  geom_tile() +
+  labs(title = "Posterior Distribution", x = "a", y = "b") +
+  scale_fill_viridis_c() +
+  theme_minimal()
+
+```
+
+
+### **2.3 Plot the full posterior distribution. What information is there in the full posterior that is lost in the marginal posteriors of a and b?**
+
+The full posterior distribution can be plotted directly from the previous step. We’ve already generated the posterior for each combination of a and b, and visualized it using geom_tile in ggplot2.
+
+However, the marginal posteriors of a and b would be obtained by integrating over the other parameter, which effectively collapses the full posterior into two one-dimensional distributions. By comparing the full posterior and the marginal posteriors, we can see the information that is lost.
+
+```{r}
+# Full posterior distribution
+ggplot(posterior_df, aes(x = a, y = b, fill = posterior)) +
+  geom_tile() +
+  labs(title = "Full Posterior Distribution", x = "a", y = "b") +
+  scale_fill_viridis_c() +
+  theme_minimal()
+
+
+# Marginal posteriors
+marginal_a <- apply(posterior, 1, sum)
+marginal_b <- apply(posterior, 2, sum)
+par(mfrow = c(1, 2))
+plot(a_grid, marginal_a, type = "l", main = "Marginal Posterior of a", xlab = "a", ylab = "Density")
+plot(b_grid, marginal_b, type = "l", main = "Marginal Posterior of b", xlab = "b", ylab = "Density")
+```
+
+**Comparison Between Full and Marginal Posteriors**
+
+| Feature                      | Full Posterior Distribution                            | Marginal Posterior Distribution                          |
+|------------------------------|--------------------------------------------------------|----------------------------------------------------------|
+| **Definition**                | The joint distribution of both \(a\) and \(b\).        | The individual distributions of \(a\) and \(b\), marginalizing over the other parameter. |
+| **What It Shows**             | The relationship between \(a\) and \(b\), including their dependencies. | The distribution of \(a\) and \(b\) independently, ignoring their joint relationship. |
+| **How It Is Visualized**      | Heatmap or 2D plot showing the joint distribution.    | Separate 1D plots showing the distribution of \(a\) and \(b\). |
+| **What Information It Loses** | None – it retains the full joint relationship.         | It loses the joint relationship between \(a\) and \(b\), showing them as if they are independent. |
+| **Usefulness**                | Helps in understanding how \(a\) and \(b\) interact.  | Useful for marginal inference, focusing on each parameter independently. |
+| **Example Plot**              | 2D Heatmap/Contour plot for joint distribution.        | Two separate line plots for \(a\) and \(b\). |
+
+### **2.4 Compute the marginal posterior mode of a.**
+
+The mode of the marginal posterior of a is the value of a that maximizes the marginal posterior distribution. We can find this by identifying the maximum value in the marginal distribution of a.
+
+```{r}
+mode_a <- a_grid[which.max(marginal_a)]
+cat("Mode of the marginal posterior for a:", mode_a, "\n")
+
+# Plotting marginal posterior of a and highlighting the mode
+plot(a_grid, marginal_a, type = "l", 
+     main = "Marginal Posterior of a", 
+     xlab = "a", ylab = "Density", 
+     col = "blue", lwd = 2)
+
+# Adding a vertical line for mode of a
+abline(v = mode_a, col = "red", lwd = 2, lty = 2)
+
+# Adding a text annotation for mode
+text(mode_a, max(marginal_a), labels = paste("Mode: ", round(mode_a, 2)), 
+     pos = 4, col = "red")
+
+```
+
+
+**References**
+
+- https://rpubs.com/friendly/grid_approx
+
+- https://en.wikipedia.org/wiki/Posterior_probability
+
+- https://www.statlect.com/glossary/posterior-probability
+
+- https://www.sciencedirect.com/topics/mathematics/marginal-posterior-distribution
+
+
+

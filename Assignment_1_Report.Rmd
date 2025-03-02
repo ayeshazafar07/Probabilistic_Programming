@@ -1,0 +1,303 @@
+---
+title: "Assignment 1 Report"
+author: "Ayesha Zafar"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# 1. Explanations
+
+---
+
+### **1.1 What is the difference between an informative and a non-informative prior?**
+
+In Bayesian statistics, **priors** represent our knowledge about a parameter before collecting data.
+
+### Informative Priors
+- **Definition**: Reflect substantial prior knowledge about the parameter.
+- **Shape**: Often specific (e.g., Normal, Beta).
+- **Impact on Posterior**: Strong influence on the posterior.
+- **Use**: When we have solid prior knowledge (e.g., previous studies).
+- **Example**: If we know the height of a population is around 170 cm, we may set a **Normal distribution** centered around 170 with a small standard deviation, indicating that most values are near 170.
+
+
+### Non-Informative Priors
+- **Definition**: Represent minimal or no prior knowledge.
+- **Shape**: Typically flat or weakly informative.
+- **Impact on Posterior**: Minimal influence, allowing data to drive the posterior.
+- **Use**: When prior knowledge is uncertain or unavailable.
+- **Example**: If we have no prior information, a **Uniform distribution** over a wide range might be used, suggesting that all values are equally likely within that range.
+
+
+### Key Differences
+
+| **Aspect**               | **Informative Prior**       | **Non-Informative Prior**  |
+|--------------------------|-----------------------------|----------------------------|
+| **Knowledge**            | Substantial prior knowledge | Minimal or no prior knowledge |
+| **Shape**                | Specific (e.g., Normal)     | Flat or weakly informative  |
+| **Impact on Posterior**  | Strong influence            | Minimal influence           |
+
+### Visualizing the Difference
+
+- **Informative Prior**: Narrow peak centered around known values (e.g., 170 cm).
+- **Non-Informative Prior**: Flat distribution over a wide range of values.
+
+
+We can visualize the difference between **informative** and **non-informative** priors using simple plots. Here, we compare a **Normal distribution** as an informative prior with a **Uniform distribution** as a non-informative prior.
+
+```{r}
+library(ggplot2)
+set.seed(123)
+
+informative_prior <- rnorm(1000, mean = 170, sd = 5)
+non_informative_prior <- runif(1000, min = 150, max = 200)
+data_informative <- data.frame(value = informative_prior, prior_type = "Informative Prior")
+data_non_informative <- data.frame(value = non_informative_prior, prior_type = "Non-Informative Prior")
+prior_data <- rbind(data_informative, data_non_informative)
+
+ggplot(prior_data, aes(x = value, fill = prior_type)) +
+  geom_density(alpha = 0.6) +
+  labs(title = "Informative vs Non-Informative Priors",
+       x = "Parameter Value", y = "Density") +
+  scale_fill_manual(values = c("skyblue", "salmon")) +
+  theme_minimal()
+```
+
+### **1.2 Given N posterior samples {αi,βi}, where i = 1,…,N is the sample index, how can you compute marginal posterior samples for √α**
+
+```{r}
+# Loading packages
+library(rstan)
+library(ggplot2)
+library(bayesplot)
+library(loo)
+
+# Creating samples
+set.seed(123)
+N <- 1000
+# Using absolute so we get positive values only
+alpha_samples <- abs(rnorm(N, mean = 0, sd = 1)) 
+beta_samples <- abs(rnorm(N, mean = 0, sd = 1))
+
+# Computing marginal posterior samples for √α
+sqrt_alpha_samples <- sqrt(alpha_samples)
+
+# Plotting
+ggplot() +
+  geom_histogram(aes(sqrt_alpha_samples), bins = 30, fill = "blue", alpha = 0.5) +
+  labs(title = "Distribution of √α", x = "√α", y = "Frequency")
+```
+
+### **1.3 Given the samples √αi in 1.2, how do you compute the posterior probability that −1< √α <1?**
+```{r}
+# Computing posterior probability -1 < √α < 1
+prob <- mean(sqrt_alpha_samples > -1 & sqrt_alpha_samples < 1) 
+cat("Posterior Probability -1 < √α < 1 is: ", prob, "\n")
+```
+
+### **1.4 A parameter in a statistical model, θ, is given a prior Beta(α,β). After fitting, there are 1000 samples for the hyperparameters α,β. Using these samples, how can you generate samples from the population distribution of θ?**
+
+```{r}
+# Generating θ samples from the population distribution
+theta_samples <- rbeta(N, shape1 = alpha_samples + 0.1, shape2 = beta_samples + 0.1)
+cat("First 5 θ samples are: ", head(theta_samples), "\n")
+
+# Plotting
+ggplot() +
+  geom_histogram(aes(theta_samples), bins = 30, fill = "green", alpha = 0.5) +
+  labs(title = "Distribution of θ samples", x = "theta", y = "Frequency")
+```
+
+### **1.5 Consider the Stan program below. What is computed in the generated quantities block?**
+``` 
+data {
+  int<lower=0> N;
+  vector[N] x;
+  int<lower=0,upper=1> y[N];
+  
+  real x_pred;
+}
+parameters {
+  real alpha;
+  real beta;
+}
+transformed parameters {
+  vector[N] theta = 1 ./ (1 + exp(-(alpha + beta*x)));
+}
+model {
+  y ~ bernoulli(theta);
+  alpha ~ normal(0, 1);
+  beta ~ normal(0, 1);
+}
+generated quantities {
+  real theta_pred = 1 / (1 + exp(-(alpha + beta*x_pred)));
+}
+```
+The **generated quantities** block here is used to calculate extra values after the model runs. It doesn’t affect the fitting process but helps with things like predictions. 
+
+It calculates theta_pred, the predicted probability of success for a new input (x_pred) based on the logistic regression model. This happens in two steps:
+
+  - **Combine Parameters:** Adds alpha (intercept) and beta * x_pred (slope times input)
+  - **Transform to Probability:** Converts the result into a probability using the logistic formula
+  
+This prediction reflects the model’s uncertainty because it’s computed for every sampled parameter set. It’s useful for seeing how well the model generalizes to new data points.
+
+### **1.6 Consider the Stan program below. If you try using it on some data, it will not work. How can you fix it without changing anything in the model block?**
+```
+data{
+  int<lower=0> N;
+  vector[N] x;
+  vector[N] y;
+}
+parameters{
+  real a;
+}
+
+model{
+  y ~ normal(x, a);
+  a ~ normal(0, 1);
+}
+```
+
+**Problem with current stan model**
+The stan model defines the parameter **a** as a scalar. However, in the model block, y ~ normal(x, a) implies that **a** is expected to be a standard deviation parameter for each observation. Since **a** is scalar, stan cannot match the dimensions, leading to an error.
+
+**Fix without changing model block**
+Without modifying the model block, we can adjust the data fed into stan to match the expected structure. Specifically, the standard deviation for y must be handled as a scalar rather than as a per-observation vector.
+Below code is an example how it can be done.
+
+```{r}
+library(rstan)
+
+# Creating Data
+N <- 100                        
+x <- rnorm(N, mean = 0, sd = 1) 
+y <- x + rnorm(N, mean = 0, sd = 1)
+
+# Preparing data for stan
+stan_data <- list(N = N, x = x, y = y)
+
+# Given stan code
+stan_code <- "
+data {
+  int<lower=0> N;        
+  vector[N] x;           
+  vector[N] y;           
+}
+parameters {
+  real a;               
+}
+model {
+  y ~ normal(x, a);     
+  a ~ normal(0, 1);     
+}
+"
+
+# Compiling, fitting, and printing stan model
+stan_model <- stan_model(model_code = stan_code)
+fit <- sampling(
+  object = stan_model,
+  data = stan_data,
+  iter = 2000,
+  chains = 4,
+  seed = 123
+)
+print(fit)
+
+```
+
+Now the stan model will successfully compute the posterior distribution for **a**, capturing its scalar nature while applying it across all observations in y.
+
+
+### **1.7 What is the point in running multiple MCMC chains when sampling from a probability distribution?**
+
+**1. Check Convergence:** When all chains end up at the same posterior distribution, it’s a good sign that the model has converged properly, and we can trust the results.
+
+**2. Spot Problems:** Multiple chains can highlight issues like:
+
+  **- Multimodality:** If chains settle in different places, it might mean the model isn’t capturing the data well or the posterior has multiple peaks.
+  
+  **- Poor Mixing:** If a chain struggles to explore, it could mean the sampler isn’t working efficiently.
+  
+**3. Build Confidence:** Independent chains starting from different points make sure results aren’t overly influenced by initial values or random noise.
+
+**4. Use Diagnostics:** Tools like the Gelman-Rubin statistic use multiple chains to confirm that convergence is solid (values near 1 are good).
+
+In short, running multiple chains ensures our model is behaving well, exploring the data thoroughly, and giving results we can rely on.
+
+### **1.8 When using the random walk Metropolis-Hastings algorithm, which generates proposals from a multivariate normal distribution, why does the acceptance probability reduce to the form r=min(1,P(θ∗)/P(θi−1))? Above, P is the target distribution, and θ∗,θi− the proposal and current chain values, respectively.**
+
+Below are some of the reasons why acceptance probability reduces to the given form:
+
+**1. Symmetric Proposal Distribution:** The proposal distribution is a multivariate normal distribution, which is symmetric. This means that the probability of proposing a move to θ∗ from θi-1 is the same as proposing the reverse move. So, the proposal probability cancels out when calculating the acceptance ratio.
+
+**2. Target Distribution:** The only factor that matters for the acceptance probability is the target distribution, P(θ), because the symmetry of the proposal distribution makes it irrelevant for the ratio.
+
+**3. Simplified Formula:** As a result, the acceptance ratio reduces to just the ratio of the target probabilities at the current and proposed values, i.e., P(θ∗)/P(θi-1) . If the proposed value θ∗ has a higher probability than the current value θi-1, the move is accepted.
+
+In short, the symmetry of the proposal distribution means the acceptance probability only depends on how the current and proposed states compare according to the target distribution.
+
+### **1.9 In Bayesian leave-one-out cross-validation, how is the effective number of parameters computed and what do the components of the formula represent?**
+
+In Bayesian leave-one-out cross-validation (LOO-CV), the effective number of parameters is a way to measure the complexity of a model based on its fit to the data. It helps us understand how much the model is "overfitting" or "underfitting" the data.
+
+To calculate p_eff, we look at how much the predictions for each data point vary across all the samples from the model’s posterior distribution. This variability in the model’s predictions tells us how much flexibility the model has in fitting the data.
+
+The formula for p_eff sums up the variance of the log-likelihood for each data point, which is essentially the uncertainty in the model’s prediction for each data point after excluding it. The more variability there is in the model’s predictions, the higher the effective number of parameters.
+
+In short, p_eff gives us an idea of how much information the model is capturing. A higher value usually means the model is more complex and may be overfitting, while a lower value suggests the model is simpler or underfitting.
+
+### **1.10 A chicken scientist models the weight of eggs as a function of hens’ age using Gaussian processes. He specifies the model as follows: egg weight∼N(f(hen age),σ2)f∼GP(0,Σ) where f is an unknown function, σ2 variance and Σ the squared exponential covariance function with well-chosen hyperparameters. The number of data points is relative low and the scientist generates posterior predictions across a common chicken life span. However, the predictions suggest a physically impossible relationship between egg weight and hen age. What is wrong with the predictions?**
+
+**Problem with predictions**
+  
+  **1. Overfitting:** The Gaussian Process (GP) model is very flexible but can overfit when there’s not enough data.
+  
+  **2. Unrealistic Behavior:** With too few data points, the GP can generate physically impossible relationships, like an unrealistic trend between egg weight and hen age.
+
+**Potential solutions**
+  
+  **1. Use Informative Priors:** Restrict the model’s flexibility by adding more informed priors on the hyperparameters (e.g., length-scale, variance).
+  
+  **2. Add More Data:** Include more data points or domain-specific knowledge (like known biological relationships) to prevent unrealistic behavior.
+
+**Visualizing**
+
+```{r}
+library(ggplot2)
+library(MASS)
+
+set.seed(123)
+hen_age <- seq(0, 10, by=0.1)
+egg_weight <- 5 + 0.5 * hen_age + rnorm(length(hen_age), sd=0.5)
+
+gp_model <- loess(egg_weight ~ hen_age)
+predicted_weight <- predict(gp_model, newdata = data.frame(hen_age = hen_age))
+
+ggplot(data = data.frame(hen_age, egg_weight, predicted_weight), aes(x = hen_age)) +
+  geom_point(aes(y = egg_weight), color = "blue") +
+  geom_line(aes(y = predicted_weight), color = "red") +
+  labs(title = "Gaussian Process Model without Constraints", 
+       y = "Egg Weight", x = "Hen Age")
+
+```
+
+
+**References**
+
+- https://www.r-project.org/other-docs.html
+
+- https://cran.r-project.org/web/packages/rstan/vignettes/rstan.html
+
+- https://mc-stan.org/loo/
+
+- https://discourse.mc-stan.org/t/multi-chain-vs-single-chain/30094
+
+- https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm
+
+- https://www.youtube.com/watch?v=25-PpMSrAGM
+
+- https://fieldnotess.medium.com/uninformative-priors-informative-priors-cef9c3c6cbdf
+

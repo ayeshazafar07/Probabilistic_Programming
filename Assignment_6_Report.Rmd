@@ -1,0 +1,273 @@
+---
+title: "Assignment 6 Report"
+author: "Ayesha Zafar"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# 6. Bayes factors
+
+---
+
+**1. Data Loading and Processing**
+
+```{r}
+# Setting X
+X <- c(-0.48, -0.17, 0, 0.74, 0.9, -3.72, -0.39, -3.62,
+       -2.54, 2.17, -2.02, -0.15, 0.53, -1.1, 0.16, -0.91,
+       0.88, -0.03, 1.66, -12.49, -2.66, 0.53, -0.68, -3.8,
+       4.07, 3.49, -0.46, 3.71, -1.12, 0.06, 1.81, 3.84,
+       0.83, -0.23, 0.31, -0.21, -1.52, 0.44, 0.56, 0.32,
+       1.91, 0.93, -0.36, -0.57, -2.96, -6.35, 1.28, -1.13,
+       0.33, 0.8, 7.83, -1.78, -0.64, -2.6, 0.29, 3.13,
+       -1.36, 1.2, -8.12, 0.75, 0.21, 1.44, 0, 48.37, -0.81,
+       -5.03, 2.51, 0.04, -2.65, 0.37, -1.85, 6.98, 0.32,
+       -0.76, -0.34, -0.26, 0.54, 1.09, 1.17, 1.62, 3.7, 16.54,
+       -0.03, -0.79, 0.75, 0.33, -2.74, 1.08)
+
+# Summary of X
+summary(X)
+
+# Checking outliers
+hist(X, main = "Histogram of Data", xlab = "Data", breaks = 20)
+```
+
+**2. Marginal Likelihood Computation**
+
+To compare models, we calculate the marginal likelihood for the normal and cauchy models using Monte Carlo Integration:
+
+1. Normal Model:
+
+- Sample parameters mean and std from their priors.
+
+- Compute the likelihood of the data under the Normal model for each parameter sample.
+
+2. Cauchy Model:
+
+- Sample location and scale parameters from their priors.
+
+- Compute the likelihood of the data under the cauchy model for each parameter sample.
+
+```{r}
+# Monte Carlo Integration
+compute_marginal_likelihood <- function(X, model, n_samples = 10000) {
+  if (model == "normal") {
+    # Using narrower prior for mu and half-normal prior for sigma
+    mu_samples <- rnorm(n_samples, 0, 0.5)
+    sigma_samples <- abs(rnorm(n_samples, 0, 0.5))  
+    log_likelihoods <- sapply(1:n_samples, function(i) {
+      # Log-likelihood for normal
+      sum(dnorm(X, mean = mu_samples[i], sd = sigma_samples[i], log = TRUE))  
+    })
+  } else if (model == "cauchy") {
+    # Using normal prior for location and gamma prior for scale
+    x0_samples <- rnorm(n_samples, 0, 1)
+    gamma_samples <- rgamma(n_samples, 2, 1)
+    log_likelihoods <- sapply(1:n_samples, function(i) {
+      # Log-likelihood for cauchy
+      sum(dcauchy(X, location = x0_samples[i], scale = gamma_samples[i], log = TRUE))  
+    })
+  } else {
+    stop("Invalid model specified!")
+  }
+  # Using exp to return marginal likelihood
+  return(mean(exp(log_likelihoods)))  
+}
+
+# Computing marginal likelihoods for normal and cauchy
+normal_marginal_likelihood <- compute_marginal_likelihood(X, model = "normal")
+cauchy_marginal_likelihood <- compute_marginal_likelihood(X, model = "cauchy")
+```
+
+The function compute_marginal_likelihood calculates the marginal likelihood for normal and cauchy models using Monte Carlo integration. For each model, we sample parameters and then compute likelihood using data X.
+
+The likelihoods are averaged over samples to estimate marginal likelihood for each model.
+
+**3. Computing the Bayes Factor**
+
+The Bayes Factor is calculated as ratio of marginal likelihoods:
+
+BF = Marginal Likelihood(Normal) / Marginal Likelihood (Cauchy)
+ 
+This provides evidence for one model over the other.
+
+```{r}
+# Computing Bayes factor
+bayes_factor <- normal_marginal_likelihood / cauchy_marginal_likelihood
+cat("Bayes Factor (Normal / Cauchy):", bayes_factor, "\n")
+```
+
+**4. Summarizing Results**
+
+```{r}
+library(knitr)
+bayes_factor_summary <- data.frame(
+  Model = c("Normal", "Cauchy"),
+  MarginalLikelihood = c(normal_marginal_likelihood, cauchy_marginal_likelihood),
+  BayesFactor = c(bayes_factor, 1 / bayes_factor),
+  Interpretation = c(
+    ifelse(bayes_factor > 1, "Stronger evidence for Normal", "Weaker evidence for Normal"),
+    ifelse(bayes_factor < 1, "Stronger evidence for Cauchy", "Weaker evidence for Cauchy")
+  )
+)
+
+# Printing summary
+kable(bayes_factor_summary, digits = 5, caption = "Summary of Bayes Factor Results")
+```
+
+**5. Visual Comparison**
+
+Below is code to overlay normal and cauchy model fits on a histogram of data for visual comparison:
+
+- The histogram shows distribution of X.
+- PDFs of both models are overlaid to compare their fit.
+
+```{r}
+library(ggplot2)
+ggplot(data.frame(X), aes(x = X)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30, fill = "lightblue", alpha = 0.5) +
+  stat_function(fun = dnorm, args = list(mean = mean(X), sd = sd(X)), aes(color = "Normal"), linewidth = 1, linetype = "dashed") +
+  stat_function(fun = dcauchy, args = list(location = median(X), scale = mad(X)), aes(color = "Cauchy"), linewidth = 1) +
+  labs(title = "Data with Fitted Normal and Cauchy Distributions",
+       x = "Data",
+       y = "Density") +
+  scale_color_manual(name = "Distribution", values = c("Normal" = "blue", "Cauchy" = "red")) +
+  theme_minimal() +
+  theme(legend.title = element_text(size = 12), legend.text = element_text(size = 10))
+```
+
+**Interpretation of Bayes Factor**
+
+Based on the computed Bayes Factor, we interpret which model is superior and the strength of evidence.
+
+1. BF > 1: Evidence in favor of the Normal model.
+
+2. BF < 1: Evidence in favor of the Cauchy model.
+
+Given the computed Bayes Factor (significantly less than 1), the **Cauchy model** is overwhelmingly preferred over the Normal model. 
+
+This indicates strong evidence that the Cauchy distribution fits the data better.
+
+---
+
+However, it is important to note that this result might be influenced by the presence of outliers in the data. Extreme values like 48.37 and 16.54 can heavily affect the likelihood computations, especially when using models like the Normal and Cauchy distributions that are sensitive to such values.
+
+Because both models showed zero marginal likelihoods before applying any outlier handling, the results may not be fully representative of the true model comparison. To address this, we will handle the outliers by capping them to a certain threshold and recalculate the Bayes Factor. This should give us a more accurate comparison of the two models, potentially leading to a more robust conclusion.
+
+### **Handling outliers and recalculating Bayes Factor**
+
+```{r}
+library(knitr)
+library(ggplot2)
+X <- c(-0.48, -0.17, 0, 0.74, 0.9, -3.72, -0.39, -3.62,
+       -2.54, 2.17, -2.02, -0.15, 0.53, -1.1, 0.16, -0.91,
+       0.88, -0.03, 1.66, -12.49, -2.66, 0.53, -0.68, -3.8,
+       4.07, 3.49, -0.46, 3.71, -1.12, 0.06, 1.81, 3.84,
+       0.83, -0.23, 0.31, -0.21, -1.52, 0.44, 0.56, 0.32,
+       1.91, 0.93, -0.36, -0.57, -2.96, -6.35, 1.28, -1.13,
+       0.33, 0.8, 7.83, -1.78, -0.64, -2.6, 0.29, 3.13,
+       -1.36, 1.2, -8.12, 0.75, 0.21, 1.44, 0, 48.37, -0.81,
+       -5.03, 2.51, 0.04, -2.65, 0.37, -1.85, 6.98, 0.32,
+       -0.76, -0.34, -0.26, 0.54, 1.09, 1.17, 1.62, 3.7, 16.54,
+       -0.03, -0.79, 0.75, 0.33, -2.74, 1.08)
+
+# Removing outliers using IQR method
+remove_outliers_iqr <- function(X) {
+  # First Quartile
+  Q1 <- quantile(X, 0.25)  
+  # Third Quartile
+  Q3 <- quantile(X, 0.75)
+  # Interquartile Range
+  IQR <- Q3 - Q1  
+  # Setting lower bound for outliers
+  lower_bound <- Q1 - 1.5 * IQR  
+  # Setting upper bound for outliers
+  upper_bound <- Q3 + 1.5 * IQR  
+  
+  # Filtering from outliers
+  X <- X[X >= lower_bound & X <= upper_bound]
+  
+  return(X)
+}
+
+X <- remove_outliers_iqr(X)
+summary(X)
+hist(X, main = "Data after removing outliers", xlab = "Data", breaks = 20)
+
+# Computing marginal likelihood 
+compute_marginal_likelihood <- function(X, model, n_samples = 10000) {
+  if (model == "normal") {
+    mu_samples <- rnorm(n_samples, 0, 1)
+    sigma_samples <- rgamma(n_samples, 2, 1)
+    log_likelihoods <- sapply(1:n_samples, function(i) {
+      sum(dnorm(X, mean = mu_samples[i], sd = sigma_samples[i], log = TRUE))
+    })
+  } else if (model == "cauchy") {
+    x0_samples <- rnorm(n_samples, 0, 1)
+    gamma_samples <- rgamma(n_samples, 2, 1)
+    log_likelihoods <- sapply(1:n_samples, function(i) {
+      sum(dcauchy(X, location = x0_samples[i], scale = gamma_samples[i], log = TRUE))  
+    })
+  } else {
+    stop("Invalid model specified!")
+  }
+  return(mean(log_likelihoods)) 
+}
+
+# Marginal likelihoods for normal and cauchy Models
+normal_marginal_likelihood <- compute_marginal_likelihood(X, model = "normal")
+cauchy_marginal_likelihood <- compute_marginal_likelihood(X, model = "cauchy")
+
+# Calculating Bayes factor
+bayes_factor <- exp(normal_marginal_likelihood - cauchy_marginal_likelihood)
+cat("Bayes Factor (Normal / Cauchy):", bayes_factor, "\n")
+
+# Finding and printing summary of Bayes factor result
+bayes_factor_summary <- data.frame(
+  Model = c("Normal", "Cauchy"),
+  MarginalLikelihood = c(normal_marginal_likelihood, cauchy_marginal_likelihood),
+  BayesFactor = c(bayes_factor, 1 / bayes_factor),
+  Interpretation = c(
+    ifelse(bayes_factor > 1, "Stronger evidence for Normal", "Weaker evidence for Normal"),
+    ifelse(bayes_factor < 1, "Stronger evidence for Cauchy", "Weaker evidence for Cauchy")
+  )
+)
+kable(bayes_factor_summary, digits = 5, caption = "Summary of Bayes Factor Results")
+
+ggplot(data.frame(X), aes(x = X)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30, fill = "lightblue", alpha = 0.5) +
+  stat_function(fun = dnorm, args = list(mean = mean(X), sd = sd(X)), aes(color = "Normal"), linewidth = 1, linetype = "dashed") +
+  stat_function(fun = dcauchy, args = list(location = median(X), scale = mad(X)), aes(color = "Cauchy"), linewidth = 1) +
+  labs(title = "Data with Fitted Normal and Cauchy Distributions",
+       x = "Data",
+       y = "Density") +
+  scale_color_manual(name = "Distribution", values = c("Normal" = "blue", "Cauchy" = "red")) +
+  theme_minimal() +
+  theme(legend.title = element_text(size = 12), legend.text = element_text(size = 10))
+
+```
+
+After handling outliers, Cauchy distribution still fits data better.
+
+
+**References**
+
+- https://en.wikipedia.org/wiki/Bayes_factor
+
+- https://easystats.github.io/bayestestR/articles/bayes_factors.html
+
+- https://www.andywills.info/rminr/more-on-bf.html
+
+- https://en.wikipedia.org/wiki/Monte_Carlo_integration
+
+- https://www.geeksforgeeks.org/monte-carlo-integration-in-python/
+
+- https://www.quora.com/Even-though-the-curve-looks-the-same-what-is-the-difference-between-Cauchy-and-Gaussian-distribution
+
+- https://web.ipac.caltech.edu/staff/fmasci/home/mystats/CauchyVsGaussian.pdf
+
+
+
+

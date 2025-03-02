@@ -1,0 +1,192 @@
+---
+title: "Assignment 4 Report"
+author: "Ayesha Zafar"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# 4. Stan: Indomethacin
+
+---
+
+### **4.1 Implement a Stan program for the model. In the generated quantities block, generate the population distribution for λ.**
+
+The below stan model estimates the decay rate λ for each subject using a hierarchical structure. The exponential decay model is used to relate concentration of indomethacin to time. Generated quantities block in stan is used to obtain population distribution of λ by saving the λ values for each subject.
+
+```{r}
+library(rstan)
+library(ggplot2)
+library(dplyr)
+
+# Stan model
+stan_model_code <- "
+data {
+  // No of observations
+  int<lower=1> N;            
+  // No of subjects
+  int<lower=1> J;            
+  // Subject index
+  int<lower=1> subject[N];   
+  // Time measurements
+  vector[N] time;            
+  // Observed concentrations
+  vector[N] conc;            
+}
+
+parameters {
+  // Initial concentration
+  real<lower=0> C0;                       
+  // Measurement noise
+  real<lower=0> sigma;                    
+  // Population mean for λ
+  real<lower=0> lambda_mu;                
+  // Population SD for λ
+  real<lower=0> lambda_sigma;             
+  // Subject specific decay rates
+  vector<lower=0>[J] lambda;              
+}
+
+model {
+  // Prior for C0
+  C0 ~ normal(0, 10);                     
+  // Prior for measurement noise
+  sigma ~ normal(0, 1);                   
+  // Hyperprior for lambda_mu
+  lambda_mu ~ gamma(2, 1);                
+  // Hyperprior for lambda_sigma
+  lambda_sigma ~ gamma(2, 1);             
+  // Subject specific priors
+  lambda ~ gamma(lambda_mu, lambda_sigma); 
+
+  conc ~ normal(C0 * exp(-lambda[subject] .* time), sigma);
+}
+
+generated quantities {
+  // Posterior predictive samples
+  vector[N] y_pred;                       
+  // Population λ samples
+  vector[1000] population_lambda;         
+  for (n in 1:N) {
+    y_pred[n] = normal_rng(C0 * exp(-lambda[subject[n]] * time[n]), sigma);
+  }
+  for (i in 1:1000) {
+    population_lambda[i] = gamma_rng(lambda_mu, lambda_sigma);
+  }
+}
+"
+
+# Loading data from indometh.txt
+indometh <- read.csv("indometh.txt")
+
+# Extracting necessary variables from data
+N <- nrow(indometh)
+J <- length(unique(indometh$Subject))
+subject <- as.integer(indometh$Subject)
+time <- indometh$time
+conc <- indometh$conc
+
+# Preparing data for stan model
+stan_data <- list(
+  N = N,
+  J = J,
+  subject = subject,
+  time = time,
+  conc = conc
+)
+
+# Compiling stan model
+fit <- stan(
+  model_code = stan_model_code, 
+  data = stan_data,
+  iter = 2000,
+  chains = 4
+)
+
+# Printing results
+print(fit)
+```
+
+### **4.2 Plot a histogram of the population distribution samples. Include marginal posterior means of the subject-specific λi in the same figure as vertical lines.**
+
+```{r}
+# Extracting results
+samples <- extract(fit)
+
+# Plotting histogram
+pop_lambda <- samples$population_lambda
+marginal_means <- colMeans(samples$lambda)
+ggplot() +
+  geom_histogram(aes(x = pop_lambda), bins = 30, fill = "blue", alpha = 0.5) +
+  geom_vline(aes(xintercept = marginal_means), color = "red", linetype = "dashed") +
+  labs(
+    title = "Population Distribution of Lambda",
+    x = "Lambda",
+    y = "Frequency"
+  )
+
+```
+
+### **4.3 Assume a new subject enrolls in the study. Each sample from the posterior predictive distribution corresponds to a trajectory of Indomethacin concentration. Generate a plot of these trajectories.**
+
+```{r}
+# Assuming mean for new subject
+new_subject_lambda <- mean(pop_lambda) 
+time_seq <- seq(0, 8, by = 0.1)
+posterior_predictive <- sapply(
+  time_seq,
+  function(t) rnorm(1000, samples$C0 * exp(-new_subject_lambda * t), mean(samples$sigma))
+)
+
+# Plotting trajectories
+matplot(
+  time_seq,
+  t(posterior_predictive),
+  type = "l",
+  col = rgb(0, 0, 1, alpha = 0.2),
+  lty = 1,
+  xlab = "Time",
+  ylab = "Concentration",
+  main = "Posterior Predictive Trajectories"
+)
+```
+
+### **4.4 There is a time point t∗ after which, at each t≥t∗, the predicted concentration for the new subject is less than 0.1 with >90% probability. Find t∗ to a precision of 0.01.**
+
+```{r}
+# Assuming mean for new subjects lambda
+new_subject_lambda <- mean(pop_lambda)
+
+# Setting time sequence with precision of 0.01
+time_seq <- seq(0, 8, by = 0.01)
+
+# Posterior predictive concentrations for each time point
+posterior_predictive <- sapply(
+  time_seq,
+  function(t) rnorm(1000, samples$C0 * exp(-new_subject_lambda * t), mean(samples$sigma))
+)
+
+# Calculate probabilities for concentrations below 0.1
+probabilities <- apply(posterior_predictive, 2, function(x) mean(x < 0.1))
+
+# Finding first time point t* where P > 90% for all t >= t*
+t_star_index <- which(cumprod(probabilities > 0.9) == 1)[1]
+
+# Extracting t* if available
+if (!is.na(t_star_index)) {
+  t_star <- time_seq[t_star_index]
+  cat("t* =", t_star, "\n")
+} else {
+  cat("No time point satisfies condition for all t >= t*.\n")
+}
+```
+
+
+**References**
+
+- https://rdrr.io/cran/nimbleCarbon/man/postHPDplot.html
+
+- https://stackoverflow.com/questions/16571390/making-a-trajectory-plot-using-r
+
+
